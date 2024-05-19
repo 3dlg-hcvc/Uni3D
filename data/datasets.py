@@ -616,12 +616,6 @@ class Text2Shape(data.Dataset):
                 })
             print(f"Skip {tmp_count}")
 
-        # =================================================
-        # TODO: disable for backbones except for PointNEXT!!!
-        self.use_height = config.use_height
-        # =================================================
-
-        # self.template = "a point cloud model of {}."
 
     def pc_norm(self, pc):
         """ pc: NxC, return NxC """
@@ -639,20 +633,15 @@ class Text2Shape(data.Dataset):
         data = openshape_data['xyz'].astype(np.float32)
         rgb = openshape_data['rgb'].astype(np.float32)
 
-        if self.openshape_setting:
-            data[:, [1, 2]] = data[:, [2, 1]]
-            logging.info('flip yz')
-            data = normalize_pc(data)
-        else:
-            data = self.pc_norm(data)
+        # if self.openshape_setting:
+        #     data[:, [1, 2]] = data[:, [2, 1]]
+        #     logging.info('flip yz')
+        #     data = normalize_pc(data)
+        # else:
+        data = self.pc_norm(data)
 
-        if self.use_height:
-            self.gravity_dim = 1
-            height_array = data[:, self.gravity_dim:self.gravity_dim + 1] - data[:, self.gravity_dim:self.gravity_dim + 1].min()
-            data = np.concatenate((data, height_array), axis=1)
-            data = torch.from_numpy(data).float()
-        else:
-            data = torch.from_numpy(data).float()
+
+        data = torch.from_numpy(data).float()
 
         return model_id, data, caption, rgb
 
