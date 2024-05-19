@@ -129,11 +129,11 @@ def main(args):
     logging.info("=> creating LVIS dataset")
 
     tokenizer = SimpleTokenizer()
-    test_lvis_dataset = utils.get_dataset(None, tokenizer, args, 'val_lvis')
-    test_lvis_loader = torch.utils.data.DataLoader(
-        test_lvis_dataset, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
-    )
+    # test_lvis_dataset = utils.get_dataset(None, tokenizer, args, 'val_lvis')
+    # test_lvis_loader = torch.utils.data.DataLoader(
+    #     test_lvis_dataset, batch_size=args.batch_size, shuffle=False,
+    #     num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
+    # )
 
     test_text2shape_dataset = utils.get_dataset(None, tokenizer, args, 'val_text2shape')
     test_text2shape_loader = torch.utils.data.DataLoader(
@@ -156,7 +156,7 @@ def main(args):
     if args.evaluate_3d:
         logging.info("=> evaluating...")
         # zero_stats, zero_stats_lvis, zero_results_scanobjnn = test_zeroshot_3d(args, model, clip_model)
-        zero_stats_lvis = test_zeroshot_3d(args, model, clip_model, test_lvis_loader, test_text2shape_loader, tokenizer)
+        zero_stats_lvis = test_zeroshot_3d(args, model, clip_model, None, test_text2shape_loader, tokenizer)
         # logging.info(zero_stats)
         logging.info(zero_stats_lvis)
         # logging.info(zero_results_scanobjnn)
