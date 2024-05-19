@@ -74,7 +74,7 @@ def parse_args(args):
         "--workers", type=int, default=4, help="Number of dataloader workers per GPU."
     )
     parser.add_argument(
-        "--batch-size", type=int, default=64, help="Batch size per GPU."
+        "--batch-size", type=int, default=32, help="Batch size per GPU."
     )
     parser.add_argument(
         "--epochs", type=int, default=32, help="Number of epochs to train for."
@@ -271,7 +271,7 @@ def parse_args(args):
     parser.add_argument('--use_lvis', action='store_true', default=False, help='whether to use livs dataset.')
 
     # Pointcloud 
-    parser.add_argument('--npoints', default=8192, type=int, help='number of points used for pre-train and test.')
+    parser.add_argument('--npoints', default=10000, type=int, help='number of points used for pre-train and test.')
     parser.add_argument('--use_height', action='store_true', default=False, help='whether to use height informatio, by default enabled with PointNeXt.')
     parser.add_argument("--pc-feat-dim", type=int, default=768, help="Pointcloud feature dimension.")
     parser.add_argument("--group-size", type=int, default=32, help="Pointcloud Transformer group size.")

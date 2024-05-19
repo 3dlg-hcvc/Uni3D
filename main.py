@@ -2,7 +2,7 @@ from collections import OrderedDict
 import math
 import time
 import wandb
-
+from tqdm import tqdm
 import torch.cuda.amp as amp
 import torch.nn.parallel
 import torch.optim
@@ -51,6 +51,7 @@ def compute_embedding(clip_model, texts, image):
     image = image.clone().detach()
     return texts, image
 
+
 def main(args):
     args, ds_init = parse_args(args)
 
@@ -58,8 +59,6 @@ def main(args):
 
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cudnn.deterministic = False
         torch.backends.cudnn.allow_tf32 = True 
    
     # get the name of the experiments
@@ -539,7 +538,7 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
         per_class_correct_top3 = collections.defaultdict(int)
         per_class_correct_top5 = collections.defaultdict(int)
 
-        for i, (pc, target, target_name, rgb) in enumerate(test_loader):
+        for i, (pc, target, target_name, rgb) in enumerate(tqdm(test_loader)):
             for name in target_name:
                 per_class_stats[name] += 1
 
@@ -626,9 +625,11 @@ def test_zeroshot_3d(args, model, clip_model):
         test_dataset_scanonjnn, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
     )
-
+    print("Testing modelnet40...")
     results_mnet = test_zeroshot_3d_core(test_loader, args.validate_dataset_name, model, clip_model, tokenizer, args, 'modelnet')
+    print("Testing LVIS...")
     results_lvis = test_zeroshot_3d_core(test_lvis_loader, args.validate_dataset_name_lvis, model, clip_model, tokenizer, args, 'lvis')
+    print("Testing ScanObjNN...")
     results_scanobjnn = test_zeroshot_3d_core(test_loader_scanonjnn, args.validate_dataset_name_scanobjnn, model, clip_model, tokenizer, args, 'scanobjnn')
     return results_mnet, results_lvis, results_scanobjnn
 
