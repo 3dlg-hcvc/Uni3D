@@ -682,6 +682,8 @@ class Dataset_3D():
             self.dataset_name = args.validate_dataset_name_lvis
         elif dataset_type == 'val_scanobjnn':
             self.dataset_name = args.validate_dataset_name_scanobjnn
+        elif dataset_type == "val_text2shape":
+            self.dataset_name = args.validate_dataset_name_text2shape
         else:
             raise ValueError("not supported dataset type.")
         with open('./data/dataset_catalog.json', 'r') as f:

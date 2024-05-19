@@ -28,5 +28,11 @@
         "train": "train",
         "test": "test",
         "usage": "test"
+    },
+    "text2shape": {
+        "config": "./data/text2shape.yaml",
+        "train": "train",
+        "test": "test",
+        "usage": "test"
     }
 }
