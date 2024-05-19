@@ -549,7 +549,6 @@ class RecallRateK:
 def test_zeroshot_3d_core_text2shape(test_loader, validate_dataset_name, model, clip_model, tokenizer, args=None, test_data=None):
     model.eval()
 
-
     queries = []
     keys = []
     true_idx = []

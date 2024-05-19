@@ -601,15 +601,20 @@ class Text2Shape(data.Dataset):
         # print_log(f'[DATASET] Open file {self.data_list_file}', logger='Objaverse')
 
         self.file_list = []
+        tmp_count = 0
         with open(config.PC_PATH, "r") as f:
             csv_reader = csv.reader(f)
             next(csv_reader, None)  # skip the header
             for row in csv_reader:
+                if not os.path.exists(os.path.join(config.PC_PATH_ROOT, row[-2], row[1] + ".npy")):
+                    tmp_count += 1
+                    continue
                 self.file_list.append({
                     'model_id': row[1],
                     'point_path': os.path.join(config.PC_PATH_ROOT, row[-2], row[1] + ".npy"),
                     'caption': row[2]
                 })
+            print(f"Skip {tmp_count}")
 
         # =================================================
         # TODO: disable for backbones except for PointNEXT!!!
