@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import torch.utils.data as data
 import copy
-
+import csv
 import yaml
 from easydict import EasyDict
 
@@ -581,7 +581,78 @@ class Objaverse_lvis_openshape(data.Dataset):
         return data, cate_id, cate_name, rgb
 
     def __len__(self):
-        return len(self.file_list)  
+        return len(self.file_list)
+
+
+
+@DATASETS.register_module()
+class Text2Shape(data.Dataset):
+    def __init__(self, config):
+        self.npoints = config.npoints
+        self.tokenizer = config.tokenizer
+        self.openshape_setting = config.openshape_setting
+
+        # self.data_list_file = config.PC_PATH
+        # self.pc_root = config.PC_PATH_ROOT
+
+        self.sample_points_num = self.npoints
+
+        # print_log(f'[DATASET] sample out {self.sample_points_num} points', logger='Objaverse')
+        # print_log(f'[DATASET] Open file {self.data_list_file}', logger='Objaverse')
+
+        self.file_list = []
+        with open(config.PC_PATH, "r") as f:
+            csv_reader = csv.reader(f)
+            next(csv_reader, None)  # skip the header
+            for row in csv_reader:
+                self.file_list.append({
+                    'model_id': row[1],
+                    'point_path': os.path.join(config.PC_PATH_ROOT, row[-2], row[1] + ".npy"),
+                    'caption': row[2]
+                })
+
+        # =================================================
+        # TODO: disable for backbones except for PointNEXT!!!
+        self.use_height = config.use_height
+        # =================================================
+
+        # self.template = "a point cloud model of {}."
+
+    def pc_norm(self, pc):
+        """ pc: NxC, return NxC """
+        centroid = np.mean(pc, axis=0)
+        pc = pc - centroid
+        m = np.max(np.sqrt(np.sum(pc ** 2, axis=1)))
+        pc = pc / m
+        return pc
+
+    def __getitem__(self, idx):
+        sample = self.file_list[idx]
+
+        caption, model_id, point_path = sample["caption"], sample['model_id'], sample['point_path']
+        openshape_data = np.load(point_path, allow_pickle=True).item()
+        data = openshape_data['xyz'].astype(np.float32)
+        rgb = openshape_data['rgb'].astype(np.float32)
+
+        if self.openshape_setting:
+            data[:, [1, 2]] = data[:, [2, 1]]
+            logging.info('flip yz')
+            data = normalize_pc(data)
+        else:
+            data = self.pc_norm(data)
+
+        if self.use_height:
+            self.gravity_dim = 1
+            height_array = data[:, self.gravity_dim:self.gravity_dim + 1] - data[:, self.gravity_dim:self.gravity_dim + 1].min()
+            data = np.concatenate((data, height_array), axis=1)
+            data = torch.from_numpy(data).float()
+        else:
+            data = torch.from_numpy(data).float()
+
+        return data, caption, rgb
+
+    def __len__(self):
+        return len(self.file_list)
     
 
 import collections.abc as container_abcs

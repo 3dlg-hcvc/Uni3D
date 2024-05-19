@@ -135,6 +135,12 @@ def main(args):
         num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
     )
 
+    test_text2shape_dataset = utils.get_dataset(None, tokenizer, args, 'val_text2shape')
+    test_text2shape_loader = torch.utils.data.DataLoader(
+        test_text2shape_dataset, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
+    )
+
     logging.info("=> create clip teacher...")
     # It is recommended to download clip model in advance and then load from the local
     clip_model, _, _ = open_clip.create_model_and_transforms(model_name=args.clip_model, pretrained=args.pretrained) 
@@ -150,7 +156,7 @@ def main(args):
     if args.evaluate_3d:
         logging.info("=> evaluating...")
         # zero_stats, zero_stats_lvis, zero_results_scanobjnn = test_zeroshot_3d(args, model, clip_model)
-        zero_stats_lvis = test_zeroshot_3d(args, model, clip_model, test_lvis_loader, tokenizer)
+        zero_stats_lvis = test_zeroshot_3d(args, model, clip_model, test_lvis_loader, test_text2shape_loader, tokenizer)
         # logging.info(zero_stats)
         logging.info(zero_stats_lvis)
         # logging.info(zero_results_scanobjnn)
@@ -508,6 +514,88 @@ def train(train_loader, clip_model, model, criterion, optimizer, scaler, schedul
             'lr': optimizer.param_groups[-1]['lr'],
             'logit_scale': logit_scale}
 
+
+class RecallRateK:
+    """
+    Recall rate at k (RR@k) metric
+    Note that this is NOT the same as the recall rate at k metric used in information retrieval.
+    Please refer to the following papers for more information:
+    - (Text2Shape) https://arxiv.org/pdf/1803.08495.pdf
+    """
+    def __init__(self, k_list: Iterable, **kwargs):
+        super().__init__(**kwargs)
+        self.k_list = k_list
+
+    def __call__(self, queries: torch.Tensor | np.ndarray, keys: torch.Tensor | np.ndarray,
+                 true_indices: torch.Tensor | np.ndarray) -> None:
+        if isinstance(queries, np.ndarray):
+            queries = self._convert_to_tensor(queries)
+        if isinstance(keys, np.ndarray):
+            keys = self._convert_to_tensor(keys)
+        if isinstance(true_indices, np.ndarray):
+            true_indices = self._convert_to_tensor(true_indices)
+        true_indices = true_indices.unsqueeze(1)
+        results = {}
+        similarities = queries @ keys.T
+        sorted_similarities = torch.argsort(similarities, dim=1, descending=True)
+        for k in self.k_list:
+            top_k = sorted_similarities[:, :k]
+            tp = torch.any(top_k == true_indices.expand(-1, k), dim=1)
+            results[k] = (torch.count_nonzero(tp) / queries.shape[0]).item()
+        return results
+
+
+@torch.no_grad()
+def test_zeroshot_3d_core_text2shape(test_loader, validate_dataset_name, model, clip_model, tokenizer, args=None, test_data=None):
+    model.eval()
+
+
+    queries = []
+    keys = []
+    true_idx = []
+    model_ids = []
+
+    for i, (pc, caption, rgb) in enumerate(tqdm(test_loader)):
+
+        tmp_selected_pcd = []
+        for j, model_id in enumerate(data_dict["model_id"]):
+            if model_id not in model_ids:
+                model_ids.append(model_id)
+                tmp_selected_pcd.append(j)
+            true_idx.append(model_ids.index(model_id))
+        pc = pc[tmp_selected_pcd].to(args.device, non_blocking=True)
+        rgb = rgb[tmp_selected_pcd].to(device=args.device, non_blocking=True)
+        feature = torch.cat((pc, rgb), dim=-1)
+        if len(tmp_selected_pcd) > 0:
+            pc_features = utils.get_model(model).encode_pc(feature)
+            pc_features = pc_features / pc_features.norm(dim=-1, keepdim=True)
+            keys.append(pc_features.cpu())
+
+        # encode text
+        tokens = tokenizer(caption).to(device=args.device, non_blocking=True)
+        caption_embeddings = clip_model.encode_text(tokens)
+        caption_embeddings = caption_embeddings / caption_embeddings.norm(dim=-1, keepdim=True)
+
+        queries.append(caption_embeddings.cpu())
+
+    true_indices = torch.tensor(true_idx, dtype=torch.int32)
+    queries = torch.cat(queries, dim=0)
+    keys = torch.cat(keys, dim=0)
+
+    rr_k_evaluator = RecallRateK(k_list=(1, 5))
+
+    result = rr_k_evaluator(queries, keys, true_indices)
+
+    for k, v in result.items():
+        print(f"Recall rate @ {k}: {v * 100:.2f}")
+
+        # cosine similarity as logits
+        # logits_per_pc = pc_features.float() @ caption_embeddings.float().t()
+
+        # measure accuracy and record loss
+        # (acc1, acc3, acc5), correct = accuracy(logits_per_pc, target, topk=(1, 3, 5))
+
+@torch.no_grad()
 def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model, tokenizer, args=None, test_data=None):
     # batch_time = AverageMeter('Time', ':6.3f')
     top1 = AverageMeter('Acc@1', ':6.2f') 
@@ -535,7 +623,7 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
         labels = json.load(f)[validate_dataset_name]
 
     with torch.no_grad():
-        logging.info('=> encoding captions')               
+        logging.info('=> encoding captions')
         text_features = []
         for l in labels:
             texts = [t.format(l) for t in templates]
@@ -610,13 +698,14 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
         top5_accuracy_per_class = collections.OrderedDict(top5_accuracy_per_class)
         logging.info(','.join(top1_accuracy_per_class.keys()))
         logging.info(','.join([str(value) for value in top1_accuracy_per_class.values()]))
-        logging.info(','.join([str(value) for value in top3_accuracy_per_class.values()]))        
+        logging.info(','.join([str(value) for value in top3_accuracy_per_class.values()]))
         logging.info(','.join([str(value) for value in top5_accuracy_per_class.values()]))
     progress.synchronize()
     logging.info('0-shot * Acc@1 {top1.avg:.3f} Acc@3 {top3.avg:.3f} Acc@5 {top5.avg:.3f}')
     return {'acc1': top1.avg, 'acc3': top3.avg, 'acc5': top5.avg}
 
-def test_zeroshot_3d(args, model, clip_model, test_lvis_loader, tokenizer):
+
+def test_zeroshot_3d(args, model, clip_model, test_lvis_loader, test_text2shape_loader, tokenizer):
     checkpoint = torch.load(args.ckpt_path, map_location='cpu')
     logging.info('loaded checkpoint {}'.format(args.ckpt_path))
     sd = checkpoint['module']
@@ -638,14 +727,17 @@ def test_zeroshot_3d(args, model, clip_model, test_lvis_loader, tokenizer):
     #     test_dataset_scanonjnn, batch_size=args.batch_size, shuffle=False,
     #     num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
     # )
+
     # print("Testing modelnet40...")
     # results_mnet = test_zeroshot_3d_core(test_loader, args.validate_dataset_name, model, clip_model, tokenizer, args, 'modelnet')
-    print("Testing LVIS...")
-    results_lvis = test_zeroshot_3d_core(test_lvis_loader, args.validate_dataset_name_lvis, model, clip_model, tokenizer, args, 'lvis')
+    # print("Testing LVIS...")
+    # results_lvis = test_zeroshot_3d_core(test_lvis_loader, args.validate_dataset_name_lvis, model, clip_model, tokenizer, args, 'lvis')
+    # print("Testing LVIS...")
+    results_text2shape = test_zeroshot_3d_core_text2shape(test_text2shape_loader, args.validate_dataset_name_text2shape, model, clip_model, tokenizer, args, 'text2shape')
     # print("Testing ScanObjNN...")
     # results_scanobjnn = test_zeroshot_3d_core(test_loader_scanonjnn, args.validate_dataset_name_scanobjnn, model, clip_model, tokenizer, args, 'scanobjnn')
     # return results_mnet, results_lvis, results_scanobjnn
-    return results_lvis
+    return results_text2shape
 
 
 class AverageMeter(object):
