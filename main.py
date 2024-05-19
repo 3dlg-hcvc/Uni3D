@@ -509,14 +509,21 @@ def train(train_loader, clip_model, model, criterion, optimizer, scaler, schedul
             'logit_scale': logit_scale}
 
 def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model, tokenizer, args=None, test_data=None):
-    batch_time = AverageMeter('Time', ':6.3f')
+    # batch_time = AverageMeter('Time', ':6.3f')
     top1 = AverageMeter('Acc@1', ':6.2f') 
     top3 = AverageMeter('Acc@3', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
+    # progress = ProgressMeter(
+    #     len(test_loader),
+    #     [batch_time, top1, top3, top5],
+    #     prefix='Test: '
+    # )
+
     progress = ProgressMeter(
         len(test_loader),
-        [batch_time, top1, top3, top5],
-        prefix='Test: ')
+        [top1, top3, top5],
+        prefix='Test: '
+    )
 
     # switch to evaluate mode
     model.eval()
@@ -542,7 +549,7 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
             text_features.append(class_embeddings)
         text_features = torch.stack(text_features, dim=0)
 
-        end = time.time()
+        # end = time.time()
         per_class_stats = collections.defaultdict(int)
         per_class_correct_top1 = collections.defaultdict(int)
         per_class_correct_top3 = collections.defaultdict(int)
@@ -573,8 +580,8 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
             top5.update(acc5.item(), pc.size(0))
 
             # measure elapsed time
-            batch_time.update(time.time() - end)
-            end = time.time()
+            # batch_time.update(time.time() - end)
+            # end = time.time()
 
             top1_accurate = correct[:1].squeeze()
             top3_accurate = correct[:3].float().sum(0, keepdim=True).squeeze()
