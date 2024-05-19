@@ -555,10 +555,10 @@ def test_zeroshot_3d_core_text2shape(test_loader, validate_dataset_name, model, 
     true_idx = []
     model_ids = []
 
-    for i, (pc, caption, rgb) in enumerate(tqdm(test_loader)):
+    for i, (model_id, pc, caption, rgb) in enumerate(tqdm(test_loader)):
 
         tmp_selected_pcd = []
-        for j, model_id in enumerate(data_dict["model_id"]):
+        for j, model_id in enumerate(model_id):
             if model_id not in model_ids:
                 model_ids.append(model_id)
                 tmp_selected_pcd.append(j)

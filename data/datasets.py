@@ -649,7 +649,7 @@ class Text2Shape(data.Dataset):
         else:
             data = torch.from_numpy(data).float()
 
-        return data, caption, rgb
+        return model_id, data, caption, rgb
 
     def __len__(self):
         return len(self.file_list)
