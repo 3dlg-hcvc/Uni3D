@@ -538,6 +538,8 @@ class RecallRateK:
         results = {}
         similarities = queries @ keys.T
         sorted_similarities = torch.argsort(similarities, dim=1, descending=True)
+        np.save("sorted_similarities.npy", sorted_similarities.cpu().numpy())
+        np.save("true_indices.npy", true_indices.cpu().numpy())
         for k in self.k_list:
             top_k = sorted_similarities[:, :k]
             tp = torch.any(top_k == true_indices.expand(-1, k), dim=1)
