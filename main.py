@@ -594,9 +594,12 @@ def test_zeroshot_3d_core_text2shape(test_loader, validate_dataset_name, model, 
         for model_id in model_ids:
             f.write(f"{model_id}\n")
 
-    with open("captions.txt", "w") as f:
+    with open("captions.csv", "w") as f:
         csv_writer = csv.writer(f)
         csv_writer.writerows(captions)
+
+    with open("captions.txt", "w") as f:
+        f.write(captions)
 
     for k, v in result.items():
         print(f"Recall rate @ {k}: {v * 100:.2f}")
