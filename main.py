@@ -1,4 +1,5 @@
 import csv
+import json
 from collections import OrderedDict
 import math
 import time
@@ -597,9 +598,9 @@ def test_zeroshot_3d_core_text2shape(test_loader, validate_dataset_name, model, 
     with open("captions.csv", "w") as f:
         csv_writer = csv.writer(f)
         csv_writer.writerows(captions)
-
-    with open("captions.txt", "w") as f:
-        f.write(captions)
+    import json
+    with open("captions.json", "w") as f:
+        json.dump(captions, f)
 
     for k, v in result.items():
         print(f"Recall rate @ {k}: {v * 100:.2f}")
