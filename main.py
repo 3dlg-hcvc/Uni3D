@@ -555,10 +555,12 @@ def test_zeroshot_3d_core_text2shape(test_loader, validate_dataset_name, model, 
     keys = []
     true_idx = []
     model_ids = []
+    captions = []
 
     for i, (model_id, pc, caption, rgb) in enumerate(tqdm(test_loader)):
 
         tmp_selected_pcd = []
+        captions.append(caption)
         for j, model_id in enumerate(model_id):
             if model_id not in model_ids:
                 model_ids.append(model_id)
@@ -590,6 +592,9 @@ def test_zeroshot_3d_core_text2shape(test_loader, validate_dataset_name, model, 
     with open("model_ids.txt", "w") as f:
         for model_id in model_ids:
             f.write(f"{model_id}\n")
+    with open("captions.txt", "w") as f:
+        for caption in captions:
+            f.write(f"{caption}\n")
 
     for k, v in result.items():
         print(f"Recall rate @ {k}: {v * 100:.2f}")
