@@ -587,6 +587,10 @@ def test_zeroshot_3d_core_text2shape(test_loader, validate_dataset_name, model, 
 
     result = rr_k_evaluator(queries, keys, true_indices)
 
+    with open("model_ids.txt", "w") as f:
+        for model_id in model_ids:
+            f.write(f"{model_id}\n")
+
     for k, v in result.items():
         print(f"Recall rate @ {k}: {v * 100:.2f}")
 
