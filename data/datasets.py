@@ -217,7 +217,7 @@ class Six(data.Dataset):
 
 
         with h5py.File("data/six_pcd_xyz_filtered.h5", "r") as f:
-            self.openshape_split = [model_id.decode() for model_id in f["id"]]
+            self.openshape_split = [model_id.decode() for model_id in f["id"][0:1000000]]
 
         # self.openshape_split = json.load(open('%s/test_split.json' % self.data_path, "r"))
         # print_log('The size of %s data is %d' % (split, len(self.openshape_split)), logger='ModelNet')
