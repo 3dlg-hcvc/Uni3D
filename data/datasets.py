@@ -249,7 +249,7 @@ class Six(data.Dataset):
         xyz = self.h5_data['pcd_xyz'][h5_idx]
         rgb = np.full_like(xyz, 0.4)
         xyz = pc_normalize(xyz)
-        return torch.from_numpy(xyz), torch.from_numpy(rgb), model_id
+        return torch.from_numpy(xyz).float(), torch.from_numpy(rgb).float(), model_id
 
 @DATASETS.register_module()
 class ScanObjNN_openshape(data.Dataset):
