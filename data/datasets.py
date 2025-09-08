@@ -236,7 +236,7 @@ class Six(data.Dataset):
         #     self.cate_to_id[lines[i]] = str(i)
 
     def __len__(self):
-        return self.model_ids
+        return len(self.model_ids)
 
     def __getitem__(self, index):
         # load from the h5
