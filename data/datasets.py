@@ -206,7 +206,43 @@ class ModelNet40_openshape(data.Dataset):
         label = np.array([int(self.cate_to_id[label_name])]).astype(np.int32)
 
         return xyz, label[0], label_name, rgb
-    
+
+
+@DATASETS.register_module()
+class Six(data.Dataset):
+    def __init__(self):
+        # self.catfile = os.path.join(self.data_path, 'modelnet40_shape_names.txt')
+        # self.cat = [line.rstrip() for line in open(self.catfile)]
+        # self.classes = dict(zip(self.cat, range(len(self.cat))))
+
+
+        with h5py.File("data/six_pcd_xyz_filtered.h5", "r") as f:
+            self.openshape_split = [model_id.decode() for model_id in f["id"]]
+
+        # self.openshape_split = json.load(open('%s/test_split.json' % self.data_path, "r"))
+        # print_log('The size of %s data is %d' % (split, len(self.openshape_split)), logger='ModelNet')
+        #
+        # self.shape_names_addr = os.path.join(self.data_path, 'modelnet40_shape_names.txt')
+        # self.cate_to_id = {}
+        # with open(self.shape_names_addr) as file:
+        #     lines = file.readlines()
+        #     lines = [line.rstrip() for line in lines]
+        # for i in range(len(lines)):
+        #     self.cate_to_id[lines[i]] = str(i)
+
+    def __len__(self):
+        return len(self.openshape_split)
+
+    def __getitem__(self, index):
+        # load from the h5
+        if not hasattr(self, 'processed_data_h5'):
+            self.h5_data = h5py.File("data/six_pcd_xyz_filtered.h5", "r")
+
+        xyz = self.h5_data['point_xyz'][index]
+        model_id = self.h5_data['id'][index]
+        rgb = np.full_like(xyz, 0.4)
+        xyz = pc_normalize(xyz)
+        return torch.from_numpy(xyz), torch.from_numpy(rgb), model_id
 
 @DATASETS.register_module()
 class ScanObjNN_openshape(data.Dataset):

@@ -1,27 +1,21 @@
 from collections import OrderedDict
 import math
 import time
-import wandb
 
-import torch.cuda.amp as amp
 import torch.nn.parallel
 import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
-import torchvision.transforms as transforms
 import collections
-
+from data.datasets import Six
 from data.datasets import *
 # from data.datasets import customized_collate_fn
 
 from utils import utils
-from utils.utils import get_dataset
 from utils.tokenizer import SimpleTokenizer
-from utils.distributed import is_master, init_distributed_device, world_info_from_env, create_deepspeed_config
+from utils.distributed import create_deepspeed_config
 from utils.params import parse_args
 from utils.logger import setup_logging
-from utils.scheduler import warmup_cosine_lr
-from utils.optim import create_optimizer, get_all_parameters, get_loss_scale_for_deepspeed, get_grad_norm_
 
 from datetime import datetime
 
@@ -104,27 +98,13 @@ def main(args):
     args.log_level = logging.DEBUG if args.debug else logging.INFO
     setup_logging(args.log_path, args.log_level)
 
-    # fully initialize distributed device environment
-    # device = init_distributed_device(args)
     device = torch.device("cuda")
-    # if args.wandb and is_master(args):
-    #     assert wandb is not None, 'Please install wandb.'
-    #     logging.debug('Starting wandb.')
-    #     wandb.init(project=args.wandb_project_name,
-    #                name=args.name,
-    #                notes=args.wandb_notes,
-    #                config=vars(args),
-    #                settings=wandb.Settings(start_method="fork"))
+
     if args.precision == 'fp16':
         logging.warning(
             'It is recommended to use AMP mixed-precision instead of FP16. '
             'FP16 support needs further verification and tuning, especially for train.')
-    # elif args.distributed:
-    #     logging.info(
-    #         f'Running in distributed mode with multiple processes. Device: {args.device}.'
-    #         f'Process (global: {args.rank}, local {args.local_rank}), total {args.world_size}.')
-    # else:
-    #     logging.info(f'Running with a single process. Device {args.device}.')
+
 
     random_seed(args.seed, 0)
 
@@ -147,237 +127,8 @@ def main(args):
         logging.info(zero_stats_lvis)
         logging.info(zero_results_scanobjnn)
         return
-    #
-    # # fix the seed for reproducibility
-    # random_seed(args.seed, args.rank)
-    #
-    # # print number of parameters
-    # total_n_parameters = sum(p.numel() for p in model.parameters())
-    # logging.info(f'number of total params: {total_n_parameters}')
-    # n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    # logging.info(f'number of params with requires_grad: {n_parameters}')
-    #
-    # if is_master(args):
-    #     logging.info("Model:")
-    #     logging.info(f"{str(model)}")
-    #     logging.info("Params:")
-    #     params_file = os.path.join(args.logs, args.name, "params.txt")
-    #     with open(params_file, "w") as f:
-    #         for name in sorted(vars(args)):
-    #             val = getattr(args, name)
-    #             logging.info(f"  {name}: {val}")
-    #             f.write(f"{name}: {val}\n")
-    #
-    # # if args.distributed and not args.horovod:
-    # if args.distributed:
-    #     if args.use_bn_sync:
-    #         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    #
-    #     if not args.enable_deepspeed:
-    #         ddp_args = {}
-    #         if args.ddp_static_graph:
-    #             # this doesn't exist in older PyTorch, arg only added if enabled
-    #             ddp_args['static_graph'] = True
-    #         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[device], **ddp_args)
-    #         model_without_ddp = model.module
-    #
-    # # create optimizer and scaler
-    # optimizer = None
-    # scaler = None
-    # if args.pretrain_dataset_name is not None:
-    #     if not args.enable_deepspeed:
-    #         scaler = amp.GradScaler() if args.precision == "amp" else None
-    #         optimizer = create_optimizer(args, model_without_ddp)
-    #     else:
-    #         scaler = None
-    #
-    #         if args.optimizer != "lamb" and args.optimizer != "adamw":
-    #             optimizer, optimizer_params = create_optimizer(
-    #                 args,
-    #                 model_without_ddp,
-    #                 return_params=True)
-    #             model, optimizer, _, _ = ds_init(
-    #                 args=args,
-    #                 model=model,
-    #                 optimizer=optimizer,
-    #                 model_parameters=optimizer_params,
-    #                 dist_init_required=not args.distributed,
-    #             )
-    #         else:
-    #             optimizer_params = get_all_parameters(args, model)
-    #             model, optimizer, _, _ = ds_init(
-    #                 args=args,
-    #                 model=model,
-    #                 model_parameters=optimizer_params,
-    #                 dist_init_required=not args.distributed,
-    #             )
-    #     if is_master(args, local=args.log_local):
-    #         logging.info(f"num of optimizer.param_groups: {len(optimizer.param_groups)}")
-    #
-    # # define loss function (criterion)
-    # criterion = models.get_filter_loss(args).to(device)
-    #
-    # # optionally resume from a checkpoint
-    # start_epoch = 0
-    # if args.resume is not None:
-    #     if args.enable_deepspeed:
-    #         if os.path.exists(args.resume):
-    #             import glob
-    #             all_checkpoints = glob.glob(os.path.join(args.resume, 'epoch_*'))
-    #             latest_ckpt = -1
-    #             for ckpt in all_checkpoints:
-    #                 t = ckpt.split('/')[-1].split('_')[1]
-    #                 if t.isdigit():
-    #                     latest_ckpt = max(int(t), latest_ckpt)
-    #             if latest_ckpt >= 0:
-    #                 start_epoch = latest_ckpt
-    #                 _, client_states = model.load_checkpoint(args.resume,
-    #                                                          tag='epoch_%d' % latest_ckpt)  # tag=f"epoch_{completed_epoch}"
-    #                 # best_acc1 = checkpoint['best_acc1']
-    #                 best_acc1 = client_states['best_acc1']
-    #                 # best_acc1 = 75.485
-    #                 logging.info(f"=> resuming checkpoint '{args.resume}' (epoch {latest_ckpt})")
-    #             else:
-    #                 logging.info("=> no checkpoint found at '{}'".format(args.resume))
-    #         else:
-    #             logging.info("=> '{}' is not existing!".format(args.resume))
-    #     else:
-    #         if os.path.isfile(args.resume):
-    #             checkpoint = torch.load(args.resume, map_location='cpu')
-    #             if 'epoch' in checkpoint:
-    #                 # resuming a train checkpoint w/ epoch and optimizer state
-    #                 start_epoch = checkpoint["epoch"]
-    #                 sd = checkpoint["state_dict"]
-    #                 if not args.distributed and next(iter(sd.items()))[0].startswith('module'):
-    #                     sd = {k[len('module.'):]: v for k, v in sd.items()}
-    #                 model.load_state_dict(sd)
-    #                 if optimizer is not None:
-    #                     optimizer.load_state_dict(checkpoint["optimizer"])
-    #                 if scaler is not None and 'scaler' in checkpoint:
-    #                     scaler.load_state_dict(checkpoint['scaler'])
-    #                 logging.info(f"=> resuming checkpoint '{args.resume}' (epoch {start_epoch})")
-    #                 best_acc1 = checkpoint['best_acc1']
-    #             else:
-    #                 # loading a bare (model only) checkpoint for fine-tune or evaluation
-    #                 model.load_state_dict(checkpoint)
-    #                 logging.info(f"=> loaded checkpoint '{args.resume}' (epoch {start_epoch})")
-    #         else:
-    #             logging.info("=> no checkpoint found at '{}'".format(args.resume))
-    #
-    # logging.info("=> creating dataset")
-    # tokenizer = SimpleTokenizer()
-    # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-    #                                  std=[0.229, 0.224, 0.225])
-    # train_transform = transforms.Compose([
-    #     transforms.RandomResizedCrop(224, scale=(0.5, 1.0)),
-    #     transforms.ToTensor(),
-    #     normalize
-    # ])
-    #
-    # train_dataset = get_dataset(train_transform, tokenizer, args, 'train')
-    # val_dataset = get_dataset(None, tokenizer, args, 'val')
-    # val_dataset_lvis = get_dataset(None, tokenizer, args, 'val_lvis')
-    # val_dataset_scanobjnn = get_dataset(None, tokenizer, args, 'val_scanobjnn')
-    #
-    # if args.distributed:
-    #     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-    #     val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-    #     val_lvis_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset_lvis)
-    #     val_scanobjnn_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset_scanobjnn)
-    #
-    # else:
-    #     train_sampler = None
-    #     val_sampler = None
-    #     val_lvis_sampler = None
-    #     val_scanobjnn_sampler = None
-    #
-    # train_loader = torch.utils.data.DataLoader(
-    #     train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-    #     num_workers=args.workers, pin_memory=True, sampler=train_sampler, drop_last=True,
-    #     collate_fn=customized_collate_fn)
-    #
-    # val_loader = torch.utils.data.DataLoader(
-    #     val_dataset, batch_size=args.batch_size, shuffle=(val_sampler is None),
-    #     num_workers=args.workers, pin_memory=True, sampler=val_sampler, drop_last=False)
-    #
-    # val_lvis_loader = torch.utils.data.DataLoader(
-    #     val_dataset_lvis, batch_size=args.batch_size, shuffle=(val_lvis_sampler is None),
-    #     num_workers=args.workers, pin_memory=True, sampler=val_lvis_sampler, drop_last=False)
-    #
-    # val_scanobjnn_loader = torch.utils.data.DataLoader(
-    #     val_dataset_scanobjnn, batch_size=args.batch_size, shuffle=(val_scanobjnn_sampler is None),
-    #     num_workers=args.workers, pin_memory=True, sampler=val_scanobjnn_sampler, drop_last=False)
-    # # create scheduler if train
-    # scheduler = None
-    # if optimizer is not None:
-    #     total_steps = len(train_loader) * args.epochs
-    #     if is_master(args):
-    #         logging.info(f"total_steps: {total_steps}")
-    #     scheduler = warmup_cosine_lr(optimizer, args, total_steps)
-    #
-    # logging.info(f"beginning training")
-    # best_epoch = -1
-    #
-    # for epoch in range(start_epoch, args.epochs):
-    #     if is_master(args):
-    #         logging.info(f'Start epoch {epoch}')
-    #
-    #     if args.distributed:
-    #         train_sampler.set_epoch(epoch)
-    #
-    #     completed_epoch = epoch + 1
-    #
-    #     train_stats = train(train_loader, clip_model, model, criterion, optimizer, scaler, scheduler, epoch, args)
-    #     val_stats = {"acc1": -1}
-    #
-    #     scaler_state = None if scaler is None else scaler.state_dict()
-    #
-    #     with amp.autocast(enabled=not args.disable_amp):
-    #         val_stats = test_zeroshot_3d_core(val_loader, args.validate_dataset_name, model, clip_model, tokenizer,
-    #                                           args, "modelnet")
-    #         logging.info(val_stats)
-    #         val_lvis_stats = test_zeroshot_3d_core(val_lvis_loader, args.validate_dataset_name_lvis, model, clip_model,
-    #                                                tokenizer, args, "lvis")
-    #         logging.info(val_lvis_stats)
-    #         val_scanobjnn_stats = test_zeroshot_3d_core(val_scanobjnn_loader, args.validate_dataset_name_scanobjnn,
-    #                                                     model, clip_model, tokenizer, args, 'scanobjnn')
-    #         logging.info(val_scanobjnn_stats)
-    #
-    #         acc1 = val_lvis_stats["acc1"]
-    #
-    #         is_best = acc1 > best_acc1
-    #         if is_best:
-    #             best_epoch = epoch
-    #
-    #         best_acc1 = max(acc1, best_acc1)
-    #
-    #         # Saving checkpoints.
-    #         # is_master(args) can not be here while using deepspped, otherwise ckpt can not be saved
-    #         if args.logs and args.logs.lower() != 'none' and args.enable_deepspeed:
-    #             deepspeed_checkpoint_path = os.path.join(args.logs, args.name, "checkpoints")
-    #             if completed_epoch == args.epochs or (
-    #                     args.save_frequency > 0 and (completed_epoch % args.save_frequency) == 0
-    #             ):
-    #                 client_state = {'epoch': completed_epoch,
-    #                                 'best_acc1': best_acc1, }
-    #                 model.save_checkpoint(save_dir=deepspeed_checkpoint_path, tag="epoch_%s" % str(completed_epoch),
-    #                                       client_state=client_state)
-    #
-    #     log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-    #                  **{f'test_{k}': v for k, v in val_stats.items()},
-    #                  **{f'test_lvis_{k}': v for k, v in val_lvis_stats.items()},
-    #                  **{f'test_scanobjnn_{k}': v for k, v in val_scanobjnn_stats.items()},
-    #                  'epoch': epoch,
-    #                  'best_acc1': best_acc1,
-    #                  'best_epoch': best_epoch}
-    #
-    #     # if utils.is_main_process() and args.wandb:
-    #     if args.wandb and is_master(args):
-    #         wandb.log(log_stats)
-    #         # wandb.watch(model)
-    #
-    # if args.wandb and is_master(args):
-    #     wandb.finish()
+    else:
+        do_inference(args, model)
 
 def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model, tokenizer, args=None, test_data=None):
     batch_time = AverageMeter('Time', ':6.3f')
@@ -479,6 +230,39 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
     progress.synchronize()
     logging.info('0-shot * Acc@1 {top1.avg:.3f} Acc@3 {top3.avg:.3f} Acc@5 {top5.avg:.3f}')
     return {'acc1': top1.avg, 'acc3': top3.avg, 'acc5': top5.avg}
+
+@torch.no_grad()
+def do_inference(args, model):
+    checkpoint = torch.load(args.ckpt_path, map_location='cpu')
+    logging.info('loaded checkpoint {}'.format(args.ckpt_path))
+    sd = checkpoint['module']
+    if next(iter(sd.items()))[0].startswith('module'):
+        sd = {k[len('module.'):]: v for k, v in sd.items()}
+    model.load_state_dict(sd)
+
+    six_dataset = Six()
+    six_loader = torch.utils.data.DataLoader(
+        six_dataset, batch_size=args.batch_size, shuffle=False,
+        num_workers=8, pin_memory=True, persistent_workers=True, drop_last=False
+    )
+
+    output_file = h5py.File("feats_h5.h5", 'w')
+    output_file.create_dataset("pcd_feats", (len(six_dataset), 1024), dtype=np.float16)
+    output_file.create_dataset("id", (len(six_dataset),), dtype=h5py.string_dtype())  # string
+
+    for i, (pcd_xyz, pcd_rgb, model_id) in enumerate(tqdm(six_loader)):
+        pcd_xyz = pcd_xyz.to(device="cuda", non_blocking=True)
+        pcd_rgb = pcd_rgb.to(device="cuda", non_blocking=True)
+        feature = torch.cat((pcd_xyz, pcd_rgb), dim=-1)
+
+        pc_features = model.encode_pc(feature)
+        pc_features = pc_features / pc_features.norm(dim=-1, keepdim=True)
+
+        batch_size = pcd_xyz.shape[0]
+        output_file["pcd_feats"][i*batch_size:(i+1)*batch_size] = pc_features.to(torch.float16).cpu().numpy()
+        output_file["id"][i*batch_size:(i+1)*batch_size] = model_id
+
+    output_file.close()
 
 
 def test_zeroshot_3d(args, model, clip_model):
