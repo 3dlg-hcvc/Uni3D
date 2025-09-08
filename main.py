@@ -403,7 +403,7 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
         text_features = []
         for l in labels:
             texts = [t.format(l) for t in templates]
-            texts = tokenizer(texts).to(device=device, non_blocking=True)
+            texts = tokenizer(texts).to(device="cuda", non_blocking=True)
             if len(texts.shape) < 2:
                 texts = texts[None, ...]
             class_embeddings = clip_model.encode_text(texts)
@@ -485,7 +485,7 @@ def test_zeroshot_3d(args, model, clip_model):
     checkpoint = torch.load(args.ckpt_path, map_location='cpu')
     logging.info('loaded checkpoint {}'.format(args.ckpt_path))
     sd = checkpoint['module']
-    if not args.distributed and next(iter(sd.items()))[0].startswith('module'):
+    if next(iter(sd.items()))[0].startswith('module'):
         sd = {k[len('module.'):]: v for k, v in sd.items()}
     model.load_state_dict(sd)
 
