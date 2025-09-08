@@ -246,7 +246,7 @@ def do_inference(args, model):
         num_workers=8, pin_memory=True, persistent_workers=True, drop_last=False
     )
 
-    output_file = h5py.File("feats_h5.h5", 'w')
+    output_file = h5py.File("feats_h5_2.h5", 'w')
     output_file.create_dataset("pcd_feats", (len(six_dataset), 1024), dtype=np.float16)
     output_file.create_dataset("id", (len(six_dataset),), dtype=h5py.string_dtype())  # string
 
