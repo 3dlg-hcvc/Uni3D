@@ -243,8 +243,10 @@ class Six(data.Dataset):
         if not hasattr(self, 'h5_data'):
             self.h5_data = h5py.File("data/six_pcd_xyz_filtered.h5", "r")
 
-        xyz = self.h5_data['pcd_xyz'][index]
-        model_id = self.h5_data['id'][index]
+        model_id = self.model_ids[index]
+        h5_idx = self.model_id_to_h5_idx_mapping[model_id]
+
+        xyz = self.h5_data['pcd_xyz'][h5_idx]
         rgb = np.full_like(xyz, 0.4)
         xyz = pc_normalize(xyz)
         return torch.from_numpy(xyz), torch.from_numpy(rgb), model_id
