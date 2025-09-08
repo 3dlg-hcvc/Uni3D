@@ -1,10 +1,8 @@
-import csv
-import json
 from collections import OrderedDict
 import math
 import time
 import wandb
-from tqdm import tqdm
+
 import torch.cuda.amp as amp
 import torch.nn.parallel
 import torch.optim
@@ -12,7 +10,7 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import collections
-from typing import Iterable
+
 from data.datasets import *
 # from data.datasets import customized_collate_fn
 
@@ -32,10 +30,12 @@ import models.uni3d as models
 
 best_acc1 = 0
 
+
 def random_seed(seed=42, rank=0):
     torch.manual_seed(seed + rank)
     np.random.seed(seed + rank)
     random.seed(seed + rank)
+
 
 def compute_embedding(clip_model, texts, image):
     text_embed_all = []
@@ -61,9 +61,9 @@ def main(args):
 
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True 
-   
-    # get the name of the experiments
+        torch.backends.cudnn.allow_tf32 = True
+
+        # get the name of the experiments
     if args.name is None:
         args.name = '-'.join([
             datetime.now().strftime("%Y_%m_%d-%H_%M_%S"),
@@ -78,7 +78,7 @@ def main(args):
             args.name,
             datetime.now().strftime("%Y_%m_%d-%H")
         ])
-    
+
     if ds_init is not None:
         dsconfg_path = os.path.join(os.getcwd(), "dsconfig", args.name)
         os.makedirs(dsconfg_path, exist_ok=True)
@@ -88,64 +88,49 @@ def main(args):
     # random_seed(args.seed, args.rank)
 
     # discover initial world args early so we can log properly
-    args.distributed = False
-    args.local_rank, args.rank, args.world_size = world_info_from_env()
+    # args.distributed = False
+    # args.local_rank, args.rank, args.world_size = world_info_from_env()
     args.log_path = None
-    if is_master(args, local=args.log_local):
-        log_base_path = os.path.join(args.logs, args.name)
-        os.makedirs(log_base_path, exist_ok=True)
-        log_filename = f'out-{args.rank}' if args.log_local else 'out.log'
-        args.log_path = os.path.join(log_base_path, log_filename)
-        if os.path.exists(args.log_path):
-            logging.error("Experiment already exists. Use --name {} to specify a new experiment.")
-            return -1
+    # if is_master(args, local=args.log_local):
+    log_base_path = os.path.join(args.logs, args.name)
+    os.makedirs(log_base_path, exist_ok=True)
+    log_filename = f'out-{args.rank}' if args.log_local else 'out.log'
+    args.log_path = os.path.join(log_base_path, log_filename)
+    if os.path.exists(args.log_path):
+        logging.error("Experiment already exists. Use --name {} to specify a new experiment.")
+        return -1
 
     # Set logger
     args.log_level = logging.DEBUG if args.debug else logging.INFO
     setup_logging(args.log_path, args.log_level)
-    
-    # fully initialize distributed device environment
-    device = init_distributed_device(args)
 
-    if args.wandb and is_master(args):
-        assert wandb is not None, 'Please install wandb.'
-        logging.debug('Starting wandb.')
-        wandb.init(project=args.wandb_project_name, 
-                name=args.name,
-                notes=args.wandb_notes,
-                config=vars(args), 
-                settings=wandb.Settings(start_method="fork"))
+    # fully initialize distributed device environment
+    # device = init_distributed_device(args)
+    device = torch.device("cuda")
+    # if args.wandb and is_master(args):
+    #     assert wandb is not None, 'Please install wandb.'
+    #     logging.debug('Starting wandb.')
+    #     wandb.init(project=args.wandb_project_name,
+    #                name=args.name,
+    #                notes=args.wandb_notes,
+    #                config=vars(args),
+    #                settings=wandb.Settings(start_method="fork"))
     if args.precision == 'fp16':
         logging.warning(
             'It is recommended to use AMP mixed-precision instead of FP16. '
             'FP16 support needs further verification and tuning, especially for train.')
-    elif args.distributed:
-        logging.info(
-            f'Running in distributed mode with multiple processes. Device: {args.device}.'
-            f'Process (global: {args.rank}, local {args.local_rank}), total {args.world_size}.')
-    else:
-        logging.info(f'Running with a single process. Device {args.device}.')
+    # elif args.distributed:
+    #     logging.info(
+    #         f'Running in distributed mode with multiple processes. Device: {args.device}.'
+    #         f'Process (global: {args.rank}, local {args.local_rank}), total {args.world_size}.')
+    # else:
+    #     logging.info(f'Running with a single process. Device {args.device}.')
 
     random_seed(args.seed, 0)
 
-    logging.info("=> creating LVIS dataset")
-
-    tokenizer = SimpleTokenizer()
-    # test_lvis_dataset = utils.get_dataset(None, tokenizer, args, 'val_lvis')
-    # test_lvis_loader = torch.utils.data.DataLoader(
-    #     test_lvis_dataset, batch_size=args.batch_size, shuffle=False,
-    #     num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
-    # )
-
-    test_text2shape_dataset = utils.get_dataset(None, tokenizer, args, 'val_text2shape')
-    test_text2shape_loader = torch.utils.data.DataLoader(
-        test_text2shape_dataset, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
-    )
-
     logging.info("=> create clip teacher...")
     # It is recommended to download clip model in advance and then load from the local
-    clip_model, _, _ = open_clip.create_model_and_transforms(model_name=args.clip_model, pretrained=args.pretrained) 
+    clip_model, _, _ = open_clip.create_model_and_transforms(model_name=args.clip_model, pretrained=args.pretrained)
     clip_model.to(device)
 
     # create model
@@ -153,17 +138,16 @@ def main(args):
     model = getattr(models, args.model)(args=args)
     model.to(device)
     model_without_ddp = model
-    
+
     # evaluate model
     if args.evaluate_3d:
         logging.info("=> evaluating...")
-        # zero_stats, zero_stats_lvis, zero_results_scanobjnn = test_zeroshot_3d(args, model, clip_model)
-        zero_stats_lvis = test_zeroshot_3d(args, model, clip_model, None, test_text2shape_loader, tokenizer)
-        # logging.info(zero_stats)
+        zero_stats, zero_stats_lvis, zero_results_scanobjnn = test_zeroshot_3d(args, model, clip_model)
+        logging.info(zero_stats)
         logging.info(zero_stats_lvis)
-        # logging.info(zero_results_scanobjnn)
+        logging.info(zero_results_scanobjnn)
         return
-    
+    #
     # # fix the seed for reproducibility
     # random_seed(args.seed, args.rank)
     #
@@ -230,7 +214,6 @@ def main(args):
     #     if is_master(args, local=args.log_local):
     #         logging.info(f"num of optimizer.param_groups: {len(optimizer.param_groups)}")
     #
-    #
     # # define loss function (criterion)
     # criterion = models.get_filter_loss(args).to(device)
     #
@@ -248,7 +231,8 @@ def main(args):
     #                     latest_ckpt = max(int(t), latest_ckpt)
     #             if latest_ckpt >= 0:
     #                 start_epoch = latest_ckpt
-    #                 _, client_states = model.load_checkpoint(args.resume, tag='epoch_%d' % latest_ckpt) #tag=f"epoch_{completed_epoch}"
+    #                 _, client_states = model.load_checkpoint(args.resume,
+    #                                                          tag='epoch_%d' % latest_ckpt)  # tag=f"epoch_{completed_epoch}"
     #                 # best_acc1 = checkpoint['best_acc1']
     #                 best_acc1 = client_states['best_acc1']
     #                 # best_acc1 = 75.485
@@ -285,10 +269,10 @@ def main(args):
     # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
     #                                  std=[0.229, 0.224, 0.225])
     # train_transform = transforms.Compose([
-    #         transforms.RandomResizedCrop(224, scale=(0.5, 1.0)),
-    #         transforms.ToTensor(),
-    #         normalize
-    #     ])
+    #     transforms.RandomResizedCrop(224, scale=(0.5, 1.0)),
+    #     transforms.ToTensor(),
+    #     normalize
+    # ])
     #
     # train_dataset = get_dataset(train_transform, tokenizer, args, 'train')
     # val_dataset = get_dataset(None, tokenizer, args, 'val')
@@ -349,11 +333,14 @@ def main(args):
     #     scaler_state = None if scaler is None else scaler.state_dict()
     #
     #     with amp.autocast(enabled=not args.disable_amp):
-    #         val_stats = test_zeroshot_3d_core(val_loader, args.validate_dataset_name, model, clip_model, tokenizer, args, "modelnet")
+    #         val_stats = test_zeroshot_3d_core(val_loader, args.validate_dataset_name, model, clip_model, tokenizer,
+    #                                           args, "modelnet")
     #         logging.info(val_stats)
-    #         val_lvis_stats = test_zeroshot_3d_core(val_lvis_loader, args.validate_dataset_name_lvis, model, clip_model, tokenizer, args, "lvis")
+    #         val_lvis_stats = test_zeroshot_3d_core(val_lvis_loader, args.validate_dataset_name_lvis, model, clip_model,
+    #                                                tokenizer, args, "lvis")
     #         logging.info(val_lvis_stats)
-    #         val_scanobjnn_stats = test_zeroshot_3d_core(val_scanobjnn_loader, args.validate_dataset_name_scanobjnn, model, clip_model, tokenizer, args, 'scanobjnn')
+    #         val_scanobjnn_stats = test_zeroshot_3d_core(val_scanobjnn_loader, args.validate_dataset_name_scanobjnn,
+    #                                                     model, clip_model, tokenizer, args, 'scanobjnn')
     #         logging.info(val_scanobjnn_stats)
     #
     #         acc1 = val_lvis_stats["acc1"]
@@ -370,264 +357,37 @@ def main(args):
     #             deepspeed_checkpoint_path = os.path.join(args.logs, args.name, "checkpoints")
     #             if completed_epoch == args.epochs or (
     #                     args.save_frequency > 0 and (completed_epoch % args.save_frequency) == 0
-    #                 ):
-    #                     client_state = {'epoch': completed_epoch,
-    #                                     'best_acc1': best_acc1,}
-    #                     model.save_checkpoint(save_dir=deepspeed_checkpoint_path, tag="epoch_%s" % str(completed_epoch), client_state=client_state)
+    #             ):
+    #                 client_state = {'epoch': completed_epoch,
+    #                                 'best_acc1': best_acc1, }
+    #                 model.save_checkpoint(save_dir=deepspeed_checkpoint_path, tag="epoch_%s" % str(completed_epoch),
+    #                                       client_state=client_state)
     #
     #     log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-    #                 **{f'test_{k}': v for k, v in val_stats.items()},
-    #                 **{f'test_lvis_{k}': v for k, v in val_lvis_stats.items()},
-    #                 **{f'test_scanobjnn_{k}': v for k, v in val_scanobjnn_stats.items()},
-    #                 'epoch': epoch,
-    #                 'best_acc1': best_acc1,
-    #                 'best_epoch': best_epoch}
+    #                  **{f'test_{k}': v for k, v in val_stats.items()},
+    #                  **{f'test_lvis_{k}': v for k, v in val_lvis_stats.items()},
+    #                  **{f'test_scanobjnn_{k}': v for k, v in val_scanobjnn_stats.items()},
+    #                  'epoch': epoch,
+    #                  'best_acc1': best_acc1,
+    #                  'best_epoch': best_epoch}
     #
     #     # if utils.is_main_process() and args.wandb:
     #     if args.wandb and is_master(args):
     #         wandb.log(log_stats)
     #         # wandb.watch(model)
-            
+    #
     # if args.wandb and is_master(args):
     #     wandb.finish()
 
-def train(train_loader, clip_model, model, criterion, optimizer, scaler, scheduler, epoch, args):
-    batch_time = AverageMeter('Time', ':6.2f')
-    data_time = AverageMeter('Data', ':6.2f')
-    mem = AverageMeter('Mem (GB)', ':6.1f')
-    metric_names = models.get_metric_names(args.model)
-    iters_per_epoch = len(train_loader) // args.update_freq
-    metrics = OrderedDict([(name, AverageMeter(name, ':.2e')) for name in metric_names])
-    progress = ProgressMeter(
-        iters_per_epoch,
-        [batch_time, data_time, mem, *metrics.values()],
-        prefix="Epoch: [{}]".format(epoch))
-
-    # switch to train mode
-    model.train()
-
-    end = time.time()
-    for data_iter, inputs in enumerate(train_loader):
-        optim_iter = data_iter // args.update_freq
-
-        step = epoch * iters_per_epoch + optim_iter # global training iteration
-        if not args.skip_scheduler:
-            scheduler(step)
-
-        # measure data loading time
-        data_time.update(time.time() - end)
-
-        texts = inputs[3]
-        pc = inputs[4] 
-        image = inputs[5]
-        rgb = inputs[6]
-
-        use_image = inputs[2].reshape(-1)
-
-        loss_masks = use_image.float()
-
-        feature = torch.cat((pc, rgb), dim=-1)
-
-        if not args.use_embed:
-            logging.info('=> encoding captions')  
-            texts, image = compute_embedding(clip_model, texts, image)
-
-        inputs = [feature, texts, image]
-
-        # to device
-        inputs = [tensor.to(device=args.device, non_blocking=True) for tensor in inputs]
-
-        if args.enable_deepspeed:
-            model.zero_grad()
-            model.micro_steps = 0
-        else:
-            optimizer.zero_grad()
-
-        # compute output
-        with amp.autocast(enabled=not args.disable_amp):
-            outputs = model(*inputs)
-            loss_dict = criterion(outputs, loss_masks)
-            loss = loss_dict['loss']
-            loss /= args.update_freq
-        
-
-        if not math.isfinite(loss.item()):
-            logging.info(f"Loss is {loss.item()}, stopping training")
-            sys.exit(1)
-
-        if scaler is not None:
-            scaler.scale(loss).backward()
-            if args.grad_clip_norm is not None:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm, norm_type=2.0)
-
-            if (data_iter + 1) % args.update_freq != 0:
-                continue
-
-        # compute gradient and do SGD step
-            scaler.step(optimizer)
-            scaler.update()
-            # model.zero_grad(set_to_none=True)
-        
-        elif args.enable_deepspeed:
-            model.backward(loss)
-            model.step()
-        else:
-            loss.backward()
-            if args.grad_clip_norm is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm, norm_type=2.0)
-            optimizer.step()  
-                  
-
-        # clamp logit scale to [0, 100]
-
-        utils.get_model(model).logit_scale.data.clamp_(0, 4.6052)
-        logit_scale = utils.get_model(model).logit_scale.exp().item()
-
-        for k in loss_dict:
-            metrics[k].update(loss_dict[k].item(), args.batch_size)
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-        mem.update(torch.cuda.max_memory_allocated() // 1e9)
-
-        if optim_iter % args.print_freq == 0:
-            if args.enable_deepspeed:
-                loss_scale, grad_nrom = get_loss_scale_for_deepspeed(model)
-            elif scaler is not None:
-                loss_scale = scaler.get_scale()
-                grad_nrom = get_grad_norm_(model.parameters())
-            else:
-                loss_scale = 0.0
-                grad_nrom = get_grad_norm_(model.parameters())
-
-            if args.wandb and is_master(args):
-                wandb.log({**{k: v.item() for k, v in loss_dict.items()},
-                        'scaler': loss_scale,
-                        'grad_norm': grad_nrom,
-                        'logit': logit_scale})
-            progress.display(optim_iter)
-            # break
-
-    progress.synchronize()
-    return {**{k: v.avg for k, v in metrics.items()},
-            'lr': optimizer.param_groups[-1]['lr'],
-            'logit_scale': logit_scale}
-
-
-class RecallRateK:
-    """
-    Recall rate at k (RR@k) metric
-    Note that this is NOT the same as the recall rate at k metric used in information retrieval.
-    Please refer to the following papers for more information:
-    - (Text2Shape) https://arxiv.org/pdf/1803.08495.pdf
-    """
-    def __init__(self, k_list: Iterable, **kwargs):
-        super().__init__(**kwargs)
-        self.k_list = k_list
-
-    def __call__(self, queries: torch.Tensor | np.ndarray, keys: torch.Tensor | np.ndarray,
-                 true_indices: torch.Tensor | np.ndarray) -> None:
-        if isinstance(queries, np.ndarray):
-            queries = self._convert_to_tensor(queries)
-        if isinstance(keys, np.ndarray):
-            keys = self._convert_to_tensor(keys)
-        if isinstance(true_indices, np.ndarray):
-            true_indices = self._convert_to_tensor(true_indices)
-        true_indices = true_indices.unsqueeze(1)
-        results = {}
-        similarities = queries @ keys.T
-        sorted_similarities = torch.argsort(similarities, dim=1, descending=True)
-        np.save("sorted_similarities.npy", sorted_similarities.cpu().numpy())
-        np.save("true_indices.npy", true_indices.cpu().numpy())
-        for k in self.k_list:
-            top_k = sorted_similarities[:, :k]
-            tp = torch.any(top_k == true_indices.expand(-1, k), dim=1)
-            results[k] = (torch.count_nonzero(tp) / queries.shape[0]).item()
-        return results
-
-
-@torch.no_grad()
-def test_zeroshot_3d_core_text2shape(test_loader, validate_dataset_name, model, clip_model, tokenizer, args=None, test_data=None):
-    model.eval()
-
-    queries = []
-    keys = []
-    true_idx = []
-    model_ids = []
-    captions = []
-
-    for i, (model_id, pc, caption, rgb) in enumerate(tqdm(test_loader)):
-
-        tmp_selected_pcd = []
-        captions.extend(caption)
-        for j, model_id in enumerate(model_id):
-            if model_id not in model_ids:
-                model_ids.append(model_id)
-                tmp_selected_pcd.append(j)
-            true_idx.append(model_ids.index(model_id))
-        pc = pc[tmp_selected_pcd].to(args.device, non_blocking=True)
-        rgb = rgb[tmp_selected_pcd].to(device=args.device, non_blocking=True)
-        feature = torch.cat((pc, rgb), dim=-1)
-        if len(tmp_selected_pcd) > 0:
-            pc_features = utils.get_model(model).encode_pc(feature)
-            pc_features = pc_features / pc_features.norm(dim=-1, keepdim=True)
-            keys.append(pc_features.cpu())
-
-        # encode text
-        tokens = tokenizer(caption).to(device=args.device, non_blocking=True)
-        caption_embeddings = clip_model.encode_text(tokens)
-        caption_embeddings = caption_embeddings / caption_embeddings.norm(dim=-1, keepdim=True)
-
-        queries.append(caption_embeddings.cpu())
-
-    true_indices = torch.tensor(true_idx, dtype=torch.int32)
-    queries = torch.cat(queries, dim=0)
-    keys = torch.cat(keys, dim=0)
-
-    rr_k_evaluator = RecallRateK(k_list=(1, 5))
-
-    result = rr_k_evaluator(queries, keys, true_indices)
-
-    with open("model_ids.txt", "w") as f:
-        for model_id in model_ids:
-            f.write(f"{model_id}\n")
-
-    with open("captions.csv", "w") as f:
-        csv_writer = csv.writer(f)
-        csv_writer.writerows(captions)
-    import json
-    with open("captions.json", "w") as f:
-        json.dump(captions, f)
-
-    for k, v in result.items():
-        print(f"Recall rate @ {k}: {v * 100:.2f}")
-
-        # cosine similarity as logits
-        # logits_per_pc = pc_features.float() @ caption_embeddings.float().t()
-
-        # measure accuracy and record loss
-        # (acc1, acc3, acc5), correct = accuracy(logits_per_pc, target, topk=(1, 3, 5))
-
-@torch.no_grad()
 def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model, tokenizer, args=None, test_data=None):
-    # batch_time = AverageMeter('Time', ':6.3f')
-    top1 = AverageMeter('Acc@1', ':6.2f') 
+    batch_time = AverageMeter('Time', ':6.3f')
+    top1 = AverageMeter('Acc@1', ':6.2f')
     top3 = AverageMeter('Acc@3', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
-    # progress = ProgressMeter(
-    #     len(test_loader),
-    #     [batch_time, top1, top3, top5],
-    #     prefix='Test: '
-    # )
-
     progress = ProgressMeter(
         len(test_loader),
-        [top1, top3, top5],
-        prefix='Test: '
-    )
+        [batch_time, top1, top3, top5],
+        prefix='Test: ')
 
     # switch to evaluate mode
     model.eval()
@@ -643,7 +403,7 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
         text_features = []
         for l in labels:
             texts = [t.format(l) for t in templates]
-            texts = tokenizer(texts).to(device=args.device, non_blocking=True)
+            texts = tokenizer(texts).to(device=device, non_blocking=True)
             if len(texts.shape) < 2:
                 texts = texts[None, ...]
             class_embeddings = clip_model.encode_text(texts)
@@ -653,20 +413,20 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
             text_features.append(class_embeddings)
         text_features = torch.stack(text_features, dim=0)
 
-        # end = time.time()
+        end = time.time()
         per_class_stats = collections.defaultdict(int)
         per_class_correct_top1 = collections.defaultdict(int)
         per_class_correct_top3 = collections.defaultdict(int)
         per_class_correct_top5 = collections.defaultdict(int)
 
-        for i, (pc, target, target_name, rgb) in enumerate(tqdm(test_loader)):
+        for i, (pc, target, target_name, rgb) in enumerate(test_loader):
             for name in target_name:
                 per_class_stats[name] += 1
 
-            pc = pc.to(device=args.device, non_blocking=True)
-            rgb = rgb.to(device=args.device, non_blocking=True)
-            feature = torch.cat((pc, rgb),dim=-1)
-            target = target.to(device=args.device, non_blocking=True)
+            pc = pc.to(device="cuda", non_blocking=True)
+            rgb = rgb.to(device="cuda", non_blocking=True)
+            feature = torch.cat((pc, rgb), dim=-1)
+            target = target.to(device="cuda", non_blocking=True)
 
             # encode pc
             pc_features = utils.get_model(model).encode_pc(feature)
@@ -684,8 +444,8 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
             top5.update(acc5.item(), pc.size(0))
 
             # measure elapsed time
-            # batch_time.update(time.time() - end)
-            # end = time.time()
+            batch_time.update(time.time() - end)
+            end = time.time()
 
             top1_accurate = correct[:1].squeeze()
             top3_accurate = correct[:3].float().sum(0, keepdim=True).squeeze()
@@ -721,7 +481,7 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
     return {'acc1': top1.avg, 'acc3': top3.avg, 'acc5': top5.avg}
 
 
-def test_zeroshot_3d(args, model, clip_model, test_lvis_loader, test_text2shape_loader, tokenizer):
+def test_zeroshot_3d(args, model, clip_model):
     checkpoint = torch.load(args.ckpt_path, map_location='cpu')
     logging.info('loaded checkpoint {}'.format(args.ckpt_path))
     sd = checkpoint['module']
@@ -729,35 +489,37 @@ def test_zeroshot_3d(args, model, clip_model, test_lvis_loader, test_text2shape_
         sd = {k[len('module.'):]: v for k, v in sd.items()}
     model.load_state_dict(sd)
 
+    tokenizer = SimpleTokenizer()
 
+    test_dataset = utils.get_dataset(None, tokenizer, args, 'val')
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
+    )
+    test_lvis_dataset = utils.get_dataset(None, tokenizer, args, 'val_lvis')
+    test_lvis_loader = torch.utils.data.DataLoader(
+        test_lvis_dataset, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
+    )
 
-    # test_dataset = utils.get_dataset(None, tokenizer, args, 'val')
-    # test_loader = torch.utils.data.DataLoader(
-    #     test_dataset, batch_size=args.batch_size, shuffle=False,
-    #     num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
-    # )
+    test_dataset_scanonjnn = utils.get_dataset(None, tokenizer, args, 'val_scanobjnn')
+    test_loader_scanonjnn = torch.utils.data.DataLoader(
+        test_dataset_scanonjnn, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
+    )
 
-
-    # test_dataset_scanonjnn = utils.get_dataset(None, tokenizer, args, 'val_scanobjnn')
-    # test_loader_scanonjnn = torch.utils.data.DataLoader(
-    #     test_dataset_scanonjnn, batch_size=args.batch_size, shuffle=False,
-    #     num_workers=args.workers, pin_memory=True, sampler=None, drop_last=False
-    # )
-
-    # print("Testing modelnet40...")
-    # results_mnet = test_zeroshot_3d_core(test_loader, args.validate_dataset_name, model, clip_model, tokenizer, args, 'modelnet')
-    # print("Testing LVIS...")
-    # results_lvis = test_zeroshot_3d_core(test_lvis_loader, args.validate_dataset_name_lvis, model, clip_model, tokenizer, args, 'lvis')
-    # print("Testing LVIS...")
-    results_text2shape = test_zeroshot_3d_core_text2shape(test_text2shape_loader, args.validate_dataset_name_text2shape, model, clip_model, tokenizer, args, 'text2shape')
-    # print("Testing ScanObjNN...")
-    # results_scanobjnn = test_zeroshot_3d_core(test_loader_scanonjnn, args.validate_dataset_name_scanobjnn, model, clip_model, tokenizer, args, 'scanobjnn')
-    # return results_mnet, results_lvis, results_scanobjnn
-    return results_text2shape
+    results_mnet = test_zeroshot_3d_core(test_loader, args.validate_dataset_name, model, clip_model, tokenizer, args,
+                                         'modelnet')
+    results_lvis = test_zeroshot_3d_core(test_lvis_loader, args.validate_dataset_name_lvis, model, clip_model,
+                                         tokenizer, args, 'lvis')
+    results_scanobjnn = test_zeroshot_3d_core(test_loader_scanonjnn, args.validate_dataset_name_scanobjnn, model,
+                                              clip_model, tokenizer, args, 'scanobjnn')
+    return results_mnet, results_lvis, results_scanobjnn
 
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
+
     def __init__(self, name, fmt=':f'):
         self.name = name
         self.fmt = fmt
