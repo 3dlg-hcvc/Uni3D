@@ -217,7 +217,7 @@ class Six(data.Dataset):
 
 
         with h5py.File("data/six_pcd_xyz_filtered.h5", "r") as f:
-            self.openshape_split = [model_id.decode() for model_id in f["id"]]
+            self.openshape_split_len = f["id"].shape[0]
 
         # self.openshape_split = json.load(open('%s/test_split.json' % self.data_path, "r"))
         # print_log('The size of %s data is %d' % (split, len(self.openshape_split)), logger='ModelNet')
@@ -231,18 +231,18 @@ class Six(data.Dataset):
         #     self.cate_to_id[lines[i]] = str(i)
 
     def __len__(self):
-        return len(self.openshape_split)
+        return self.openshape_split_len
 
     def __getitem__(self, index):
         # load from the h5
-        if not hasattr(self, 'processed_data_h5'):
+        if not hasattr(self, 'h5_data'):
             self.h5_data = h5py.File("data/six_pcd_xyz_filtered.h5", "r")
 
-        xyz = self.h5_data['point_xyz'][index]
+        xyz = self.h5_data['pcd_xyz'][index]
         model_id = self.h5_data['id'][index]
         rgb = np.full_like(xyz, 0.4)
         xyz = pc_normalize(xyz)
-        return torch.from_numpy(xyz), torch.from_numpy(rgb), model_id
+        return torch.from_numpy(xyz).float(), torch.from_numpy(rgb).float(), model_id
 
 @DATASETS.register_module()
 class ScanObjNN_openshape(data.Dataset):

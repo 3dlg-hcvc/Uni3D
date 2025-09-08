@@ -19,7 +19,7 @@ from utils.logger import setup_logging
 
 from datetime import datetime
 
-import open_clip
+# import open_clip
 import models.uni3d as models
 
 best_acc1 = 0
@@ -108,16 +108,16 @@ def main(args):
 
     random_seed(args.seed, 0)
 
-    logging.info("=> create clip teacher...")
+    # logging.info("=> create clip teacher...")
     # It is recommended to download clip model in advance and then load from the local
-    clip_model, _, _ = open_clip.create_model_and_transforms(model_name=args.clip_model, pretrained=args.pretrained)
-    clip_model.to(device)
+    # clip_model, _, _ = open_clip.create_model_and_transforms(model_name=args.clip_model, pretrained=args.pretrained)
+    # clip_model.to(device)
 
     # create model
     logging.info("=> creating model: {}".format(args.model))
     model = getattr(models, args.model)(args=args)
     model.to(device)
-    model_without_ddp = model
+    # model_without_ddp = model
 
     # evaluate model
     if args.evaluate_3d:
