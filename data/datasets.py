@@ -221,7 +221,7 @@ class Six(data.Dataset):
             for i, model_id in enumerate(f["id"]):
                 self.model_id_to_h5_idx_mapping[model_id.decode()] = i
 
-            self.model_ids = list(self.model_id_to_h5_idx_mapping.keys())[1000000:]
+            self.model_ids = list(self.model_id_to_h5_idx_mapping.keys())[1000000:1500000]
             # self.openshape_split_len = f["id"].shape[0]
 
         # self.openshape_split = json.load(open('%s/test_split.json' % self.data_path, "r"))
