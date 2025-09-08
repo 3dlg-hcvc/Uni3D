@@ -33,28 +33,28 @@ def pc_normalize(pc):
     pc = pc / m
     return pc
 
-def farthest_point_sample(point, npoint):
-    """
-    Input:
-        xyz: pointcloud data, [N, D]
-        npoint: number of samples
-    Return:
-        centroids: sampled pointcloud index, [npoint, D]
-    """
-    N, D = point.shape
-    xyz = point[:,:3]
-    centroids = np.zeros((npoint,))
-    distance = np.ones((N,)) * 1e10
-    farthest = np.random.randint(0, N)
-    for i in range(npoint):
-        centroids[i] = farthest
-        centroid = xyz[farthest, :]
-        dist = np.sum((xyz - centroid) ** 2, -1)
-        mask = dist < distance
-        distance[mask] = dist[mask]
-        farthest = np.argmax(distance, -1)
-    point = point[centroids.astype(np.int32)]
-    return point
+# def farthest_point_sample(point, npoint):
+#     """
+#     Input:
+#         xyz: pointcloud data, [N, D]
+#         npoint: number of samples
+#     Return:
+#         centroids: sampled pointcloud index, [npoint, D]
+#     """
+#     N, D = point.shape
+#     xyz = point[:,:3]
+#     centroids = np.zeros((npoint,))
+#     distance = np.ones((N,)) * 1e10
+#     farthest = np.random.randint(0, N)
+#     for i in range(npoint):
+#         centroids[i] = farthest
+#         centroid = xyz[farthest, :]
+#         dist = np.sum((xyz - centroid) ** 2, -1)
+#         mask = dist < distance
+#         distance[mask] = dist[mask]
+#         farthest = np.argmax(distance, -1)
+#     point = point[centroids.astype(np.int32)]
+#     return point
 
 def rotate_point_cloud(batch_data):
     """ Randomly rotate the point clouds to augument the dataset
@@ -217,7 +217,12 @@ class Six(data.Dataset):
 
 
         with h5py.File("data/six_pcd_xyz_filtered.h5", "r") as f:
-            self.openshape_split_len = f["id"].shape[0]
+            self.model_id_to_h5_idx_mapping = {}
+            for i, model_id in enumerate(f["id"]):
+                self.model_id_to_h5_idx_mapping[model_id.decode()] = i
+
+            self.model_ids = list(self.model_id_to_h5_idx_mapping.keys())[1000000:]
+            # self.openshape_split_len = f["id"].shape[0]
 
         # self.openshape_split = json.load(open('%s/test_split.json' % self.data_path, "r"))
         # print_log('The size of %s data is %d' % (split, len(self.openshape_split)), logger='ModelNet')
@@ -231,14 +236,14 @@ class Six(data.Dataset):
         #     self.cate_to_id[lines[i]] = str(i)
 
     def __len__(self):
-        return len(self.openshape_split)
+        return self.model_ids
 
     def __getitem__(self, index):
         # load from the h5
-        if not hasattr(self, 'processed_data_h5'):
+        if not hasattr(self, 'h5_data'):
             self.h5_data = h5py.File("data/six_pcd_xyz_filtered.h5", "r")
 
-        xyz = self.h5_data['point_xyz'][index]
+        xyz = self.h5_data['pcd_xyz'][index]
         model_id = self.h5_data['id'][index]
         rgb = np.full_like(xyz, 0.4)
         xyz = pc_normalize(xyz)
