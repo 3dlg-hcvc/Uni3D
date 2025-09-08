@@ -419,7 +419,7 @@ def test_zeroshot_3d_core(test_loader, validate_dataset_name, model, clip_model,
         per_class_correct_top3 = collections.defaultdict(int)
         per_class_correct_top5 = collections.defaultdict(int)
 
-        for i, (pc, target, target_name, rgb) in enumerate(test_loader):
+        for i, (pc, target, target_name, rgb) in enumerate(tqdm(test_loader)):
             for name in target_name:
                 per_class_stats[name] += 1
 
